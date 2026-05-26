@@ -1,0 +1,31 @@
+# Fichiers sensibles
+*.json
+*.key
+*.pem
+
+# Fichiers Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Environnements virtuels
+venv/
+env/
+ENV/
+.venv/
+
+# Fichiers de logs et progression
+*.log
+derniere_ligne.txt
+derniere_ligne.txt_last
+prospects_export_*.csv
+
+# IDEs
+.vscode/
+.idea/
+*.sublime-*
+
+# OS
+.DS_Store
+Thumbs.db
