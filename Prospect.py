@@ -193,6 +193,29 @@ def clean_product(product):
     resultat = re.sub(r'\s+', ' ', resultat).strip()
     return resultat
 
+def traiter_opportunite_ct(valeur):
+    """
+    Traite la colonne Opportunité (CT) :
+    - Retire tous les tirets '-'
+    - Retire le 's' à la fin du mot "container" ou "containers"
+    - Met le 'F' de 'Frigorifique' en minuscule (frigorifique)
+    """
+    if not valeur or valeur == "":
+        return ""
+    
+    valeur = str(valeur)
+    # Retire tous les tirets
+    valeur = valeur.replace('-', '')
+    
+    # Retire le 's' à la fin du mot "container" ou "containers"
+    # gère "container" -> "container", "containers" -> "container"
+    valeur = re.sub(r'containers?\b', 'container', valeur, flags=re.IGNORECASE)
+    
+    # Met 'Frigorifique' avec un f minuscule
+    valeur = re.sub(r'frigorifique', 'frigorifique', valeur, flags=re.IGNORECASE)
+    
+    return valeur
+
 def extract_date(date_str):
     if not date_str or date_str == "":
         return ""
@@ -501,9 +524,8 @@ def traiter():
         nouvelles_lignes = toutes_les_lignes[1:]
         print(f"Nouveaux prospects à traiter: {len(nouvelles_lignes)}", flush=True)
         
-        # 🔥 STOCKER LES PROSPECTS AVANT TRI
+        # 🔥 STOCKER LES PROSPECTS AVANT TRI (SANS DÉDOUBLONNAGE)
         prospects_a_ajouter = []
-        emails_ajoutes = set()
         
         for ligne in nouvelles_lignes:
             if len(ligne) <= max(colonnes.values()):
@@ -513,8 +535,6 @@ def traiter():
             if not email or email == "":
                 continue
             if "test" in email.lower() or "dummy" in email.lower():
-                continue
-            if email in emails_ajoutes:
                 continue
             
             statut = ligne[colonnes['statut']].strip() if colonnes.get('statut') is not None else ""
@@ -528,6 +548,8 @@ def traiter():
             telephone = clean_phone(telephone_brut)
             code_postal = clean_postal(postal_brut)
             produit = clean_product(produit_brut)
+            # Application du traitement sur la colonne Opportunité (CT)
+            produit = traiter_opportunite_ct(produit)
             date_clean = extract_date(date_brute)
             etiquette = get_etiquette(platform_brut)
             departement = get_department(code_postal, dept_dict)
@@ -552,7 +574,6 @@ def traiter():
                 "date": date_clean,
                 "etiquette": etiquette
             })
-            emails_ajoutes.add(email)
         
         # 🔥 TRIER PAR DATE (du plus ancien au plus récent)
         prospects_a_ajouter.sort(key=lambda x: x["date"])
@@ -602,6 +623,6 @@ def traiter():
 
 # ==================== LANCER ====================
 if __name__ == "__main__":
-    print("🚀 Démarrage du script (version avec tri par date)", flush=True)
+    print("🚀 Démarrage du script (version avec traitement Opportunité CT)", flush=True)
     traiter()
     print("✅ Script terminé", flush=True)
