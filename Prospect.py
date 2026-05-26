@@ -20,7 +20,6 @@ MOT_DE_PASSE = "goliatcont@iner202509"
 # ==================== CONFIGURATION GOOGLE SHEETS ====================
 SHEET_SOURCE_ID = "16r5SyKtSrC8_JG5atMkYPXM4QynQReFGdNjQWOKJQ4E"
 SHEET_DEST_ID = "1XBidRt-lJX9zXD3ZCCWZ-A1xKiW9NVrM5sVRPM5wce4"
-ONGLET_SOURCE = "Feuille 1"
 ONGLET_DEST = "Extraction"
 ONGLET_DEPT = "DEPARTEMENTS"
 FICHIER_SUIVI = "derniere_ligne.txt"
@@ -76,7 +75,7 @@ def sauvegarder_csv_local(data, filename="prospects_export.csv"):
     print(f"   💾 {len(data)} prospects ajoutés à {filename}", flush=True)
 
 # ==================== SUIVI DANS GOOGLE SHEETS ====================
-def ecrire_suivi_dans_sheet(client, ligne, total_prospects, count):
+def ecrire_suivi_dans_sheet(client, progression):
     try:
         spreadsheet = client.open_by_key(SHEET_DEST_ID)
         
@@ -84,82 +83,59 @@ def ecrire_suivi_dans_sheet(client, ligne, total_prospects, count):
             ws = spreadsheet.worksheet("Suivi")
         except:
             ws = spreadsheet.add_worksheet("Suivi", rows=100, cols=10)
-            ws.append_row(["Timestamp", "Dernière ligne", "Total source", "Nouveaux prospects"])
+            ws.append_row(["Timestamp", "Onglet", "Ligne traitee", "Total onglet", "Progression %"])
         
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        ws.append_row([timestamp, ligne, total_prospects, count])
+        
+        for onglet, info in progression.items():
+            ws.append_row([
+                timestamp,
+                onglet,
+                info.get("ligne_traitee", 0),
+                info.get("total", 0),
+                f"{round(info.get('ligne_traitee', 0) / max(info.get('total', 1), 1) * 100, 1)}%"
+            ])
+        
         print(f"   📝 Progression écrite dans Google Sheet (onglet Suivi)", flush=True)
         return True
     except Exception as e:
         print(f"   ⚠️ Erreur écriture suivi: {e}", flush=True)
         return False
 
-# ==================== GESTION DERNIÈRE LIGNE (AVEC HISTORIQUE) ====================
-def save_last_line(line):
-    """Ajoute la ligne traitée à l'historique (conserve tout l'historique)"""
+# ==================== GESTION DERNIÈRE LIGNE (PAR ONGLET) ====================
+def sauvegarder_progression(progression):
+    """Sauvegarde la progression pour chaque onglet"""
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    historique = f"{timestamp} - Ligne traitée: {line}\n"
     
     with open(FICHIER_SUIVI, 'a') as f:
-        f.write(historique)
+        f.write(f"\n=== {timestamp} ===\n")
+        for onglet, info in progression.items():
+            ligne = info.get("ligne_traitee", 0)
+            total = info.get("total", 0)
+            f.write(f"{onglet}: {ligne}/{total}\n")
     
-    with open(FICHIER_SUIVI + "_last", 'w') as f:
-        f.write(str(line))
+    # Aussi sauvegarder un fichier JSON pour la reprise facile
+    with open(FICHIER_SUIVI + ".json", 'w') as f:
+        json.dump(progression, f)
     
-    print(f"   📝 Historique: Ligne {line} sauvegardée", flush=True)
+    print(f"   📝 Progression sauvegardée pour {len(progression)} onglets", flush=True)
 
-def get_last_line():
-    """Lit la dernière ligne traitée depuis le fichier de suivi"""
-    if os.path.exists(FICHIER_SUIVI + "_last"):
-        with open(FICHIER_SUIVI + "_last", 'r') as f:
-            return int(f.read().strip())
-    
-    if os.path.exists(FICHIER_SUIVI):
-        with open(FICHIER_SUIVI, 'r') as f:
-            lignes = f.readlines()
-            if lignes:
-                derniere = lignes[-1].strip()
-                match = re.search(r'Ligne traitée: (\d+)', derniere)
-                if match:
-                    return int(match.group(1))
-    
-    return 1675
+def charger_progression():
+    """Charge la dernière progression sauvegardée"""
+    if os.path.exists(FICHIER_SUIVI + ".json"):
+        with open(FICHIER_SUIVI + ".json", 'r') as f:
+            return json.load(f)
+    return {}
 
-def afficher_historique():
-    if os.path.exists(FICHIER_SUIVI):
-        print("📜 HISTORIQUE DES LIGNES TRAITÉES:", flush=True)
-        with open(FICHIER_SUIVI, 'r') as f:
-            lignes = f.readlines()
-            for ligne in lignes[-5:]:
-                print(f"   {ligne.strip()}", flush=True)
-
-# ==================== SUPPRESSION DES DOUBLONS ====================
-def supprimer_doublons_extraction(ws_dest):
-    try:
-        toutes_les_lignes = ws_dest.get_all_values()
-        if len(toutes_les_lignes) <= 1:
-            return
-        
-        emails_vus = set()
-        lignes_a_supprimer = []
-        
-        for i in range(len(toutes_les_lignes) - 1, 0, -1):
-            ligne = toutes_les_lignes[i]
-            if len(ligne) > 0:
-                email = ligne[0].strip() if ligne[0] else ""
-                if email in emails_vus:
-                    lignes_a_supprimer.append(i + 1)
-                else:
-                    emails_vus.add(email)
-        
-        for row in sorted(lignes_a_supprimer, reverse=True):
-            ws_dest.delete_rows(row)
-            print(f"   🗑️ Doublon supprimé ligne {row}", flush=True)
-        
-        if lignes_a_supprimer:
-            print(f"   ✅ {len(lignes_a_supprimer)} doublons supprimés", flush=True)
-    except Exception as e:
-        print(f"   ⚠️ Erreur suppression doublons: {e}", flush=True)
+def afficher_progression(progression):
+    """Affiche la progression actuelle"""
+    print("\n📊 PROGRESSION PAR ONGLET:")
+    for onglet, info in progression.items():
+        ligne = info.get("ligne_traitee", 0)
+        total = info.get("total", 0)
+        pourcent = round(ligne / max(total, 1) * 100, 1)
+        print(f"   📄 {onglet}: {ligne}/{total} ({pourcent}%)")
+    print()
 
 # ==================== CONNEXION ====================
 def connecter():
@@ -378,6 +354,79 @@ def trouver_colonnes(entetes):
             colonnes['code_postal'] = i
     return colonnes
 
+# ==================== LIRE TOUS LES ONGLETS AVEC SUIVI ====================
+def lire_onglets_avec_progression(sheet, progression_existante):
+    """Lit tous les onglets et retourne les données avec suivi"""
+    toutes_les_lignes = []
+    nouvelle_progression = {}
+    
+    # Premier onglet: garder l'entête
+    premier = True
+    
+    for ws in sheet.worksheets():
+        nom_onglet = ws.title
+        print(f"   📄 Lecture de l'onglet: {nom_onglet}", flush=True)
+        
+        try:
+            data = ws.get_all_values()
+            if len(data) <= 1:
+                nouvelle_progression[nom_onglet] = {"total": 0, "ligne_traitee": 0}
+                continue
+            
+            nb_lignes = len(data) - 1  # Moins l'entête
+            ligne_depart = progression_existante.get(nom_onglet, {}).get("ligne_traitee", 0)
+            
+            print(f"      Total: {nb_lignes} lignes, Dernière traitée: {ligne_depart}", flush=True)
+            
+            if premier:
+                # Premier onglet: garder l'entête
+                toutes_les_lignes.append(data[0])
+                if ligne_depart < nb_lignes:
+                    nouvelles_donnees = data[ligne_depart + 1:]
+                    toutes_les_lignes.extend(nouvelles_donnees)
+                    ligne_nouvelle = nb_lignes
+                else:
+                    nouvelles_donnees = []
+                    ligne_nouvelle = ligne_depart
+                premier = False
+            else:
+                # Onglets suivants: pas d'entête
+                if ligne_depart < nb_lignes:
+                    nouvelles_donnees = data[ligne_depart + 1:]
+                    toutes_les_lignes.extend(nouvelles_donnees)
+                    ligne_nouvelle = nb_lignes
+                else:
+                    nouvelles_donnees = []
+                    ligne_nouvelle = ligne_depart
+            
+            nouvelle_progression[nom_onglet] = {
+                "total": nb_lignes,
+                "ligne_traitee": ligne_nouvelle,
+                "nouvelles": len(nouvelles_donnees)
+            }
+            
+            print(f"      ✅ Nouvelles lignes: {len(nouvelles_donnees)}", flush=True)
+            
+        except Exception as e:
+            print(f"      ⚠️ Erreur lecture {nom_onglet}: {e}", flush=True)
+            nouvelle_progression[nom_onglet] = {"total": 0, "ligne_traitee": 0, "nouvelles": 0}
+    
+    return toutes_les_lignes, nouvelle_progression
+
+# ==================== VIDER L'EXTRACTION ====================
+def vider_extraction(ws_dest):
+    try:
+        toutes_les_lignes = ws_dest.get_all_values()
+        nb_lignes = len(toutes_les_lignes)
+        
+        if nb_lignes > 1:
+            ws_dest.delete_rows(2, nb_lignes - 1)
+            print(f"   🗑️ Onglet Extraction vidé ({nb_lignes - 1} lignes supprimées)", flush=True)
+        else:
+            print(f"   ✅ Onglet Extraction déjà vide", flush=True)
+    except Exception as e:
+        print(f"   ⚠️ Erreur vidage extraction: {e}", flush=True)
+
 # ==================== AJOUTER ====================
 def ajouter_prospect_avec_retry(ws_dest, ligne, tentative=0):
     try:
@@ -397,27 +446,26 @@ def traiter():
     try:
         client = connecter()
         
-        afficher_historique()
+        # Charger la progression existante
+        progression_existante = charger_progression()
+        if progression_existante:
+            print("📊 Progression chargée:")
+            for onglet, info in progression_existante.items():
+                print(f"   📄 {onglet}: {info.get('ligne_traitee', 0)}/{info.get('total', 0)}")
         
-        print("Lecture du fichier source...", flush=True)
+        # 1. Lire TOUS les onglets avec suivi
+        print("\n📂 Lecture des onglets du fichier source...", flush=True)
         sheet_source = client.open_by_key(SHEET_SOURCE_ID)
-        ws_source = sheet_source.worksheet(ONGLET_SOURCE)
-        toutes_les_lignes = ws_source.get_all_values()
+        toutes_les_lignes, nouvelle_progression = lire_onglets_avec_progression(sheet_source, progression_existante)
         
         if len(toutes_les_lignes) <= 1:
             print("Aucune donnée dans la source", flush=True)
             return
         
-        derniere = get_last_line()
-        total = len(toutes_les_lignes)
+        # Afficher la progression
+        afficher_progression(nouvelle_progression)
         
-        print(f"Dernière ligne traitée: {derniere}", flush=True)
-        print(f"Total lignes dans source: {total}", flush=True)
-        
-        if total <= derniere:
-            print("Aucun nouveau prospect", flush=True)
-            return
-        
+        # 2. Récupérer les entêtes
         entetes = toutes_les_lignes[0]
         colonnes = trouver_colonnes(entetes)
         print("Colonnes trouvées:", list(colonnes.keys()), flush=True)
@@ -426,21 +474,21 @@ def traiter():
             print("❌ Colonne email non trouvée !", flush=True)
             return
         
+        # 3. Charger les départements
         print("Chargement des départements...", flush=True)
         dept_dict = charger_departements(client)
         print(f"   {len(dept_dict)} départements chargés", flush=True)
         
+        # 4. Préparer la destination
         sheet_dest = client.open_by_key(SHEET_DEST_ID)
         ws_dest = sheet_dest.worksheet(ONGLET_DEST)
         
-        print("🧹 Suppression des doublons existants...", flush=True)
-        supprimer_doublons_extraction(ws_dest)
+        # Vider l'extraction (première fois seulement, commenter après)
+        print("🧹 Nettoyage de l'onglet Extraction...", flush=True)
+        vider_extraction(ws_dest)
         
-        toutes_les_lignes_dest = ws_dest.get_all_values()
-        lignes_avant = len(toutes_les_lignes_dest)
-        print(f"   📊 {lignes_avant} lignes dans Extraction après nettoyage", flush=True)
-        
-        nouvelles_lignes = toutes_les_lignes[derniere:]
+        # 5. Traiter les nouvelles lignes
+        nouvelles_lignes = toutes_les_lignes[1:]  # Tout sauf l'entête
         print(f"Nouveaux prospects à traiter: {len(nouvelles_lignes)}", flush=True)
         
         count = 0
@@ -496,15 +544,17 @@ def traiter():
             time.sleep(DELAI_ENTRE_ECRITURES)
         
         if count > 0:
-            premiere_ligne = lignes_avant + 1
+            premiere_ligne = 2
             print(f"   🎨 Coloration des lignes {premiere_ligne} à {premiere_ligne + count - 1}", flush=True)
             
             for i in range(count):
                 colorer_ligne(ws_dest, premiere_ligne + i)
             
-            save_last_line(total)
+            # Sauvegarder la progression
+            sauvegarder_progression(nouvelle_progression)
             
-            ecrire_suivi_dans_sheet(client, total, total, count)
+            # Écrire dans le sheet de suivi
+            ecrire_suivi_dans_sheet(client, nouvelle_progression)
             
             print(f"\n✅ {count} prospects ajoutés avec succès !", flush=True)
             print(f"🎨 {count} nouvelles lignes colorées", flush=True)
@@ -520,12 +570,10 @@ def traiter():
         print(f"❌ Erreur: {e}", flush=True)
         import traceback
         traceback.print_exc()
-        ligne_arret = get_last_line()
-        envoyer_alerte_email(ligne_arret, e)
         return False
 
 # ==================== LANCER ====================
 if __name__ == "__main__":
-    print("🚀 Démarrage du script", flush=True)
+    print("🚀 Démarrage du script (version multi-onglets avec suivi)", flush=True)
     traiter()
     print("✅ Script terminé", flush=True)
